@@ -2,12 +2,14 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
-using yoban.Mqtt.ControlPacket;
 
 namespace yoban.Mqtt
 {
-    public static class SocketExtensions
+    public static class AsyncExtensions
     {
+        public static Task<IPHostEntry> GetHostEntryAsync(string hostName)
+            => Task.Factory.FromAsync(Dns.BeginGetHostEntry, Dns.EndGetHostEntry, hostName, null);
+        
         public static Task ConnectAsync(this Socket socket, IPAddress ipAddress, int port)
         {
             var tcs = new TaskCompletionSource<bool>(socket);
