@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 
@@ -6,20 +7,22 @@ namespace yoban.Mqtt
 {
     public class SocketConnection : INetworkConnection
     {
-        private readonly IPAddress _ipAddress;
-        private readonly int _port;
         private Socket _socket;
-        public SocketConnection(IPAddress ipAddress, int port)
+        private NetworkStream _stream;
+        public SocketConnection(string hostName, int port)
         {
-            _ipAddress = ipAddress;
-            _port = port;
+            HostName = hostName;
+            Port = port;
         }
-        public Task ConnectAsync()
+        public string HostName { get; private set; }
+        public int Port { get; private set; }
+        public async Task<Stream> ConnectAsync()
         {
-            _socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-            return _socket.ConnectAsync(_ipAddress, _port);
+            var ipAddress = IPAddress.Parse(HostName);
+            _socket = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            await _socket.ConnectAsync(ipAddress, Port);
+            _stream = new NetworkStream(_socket);
+            return _stream;
         }
-        public Task<int> ReadAsync(byte[] buffer, int offset, int size) => _socket.ReceiveBytesAsync(buffer, offset, size);
-        public Task<int> WriteAsync(byte[] buffer, int offset, int size) => _socket.SendBytesAsync(buffer, offset, size);
     }
 }

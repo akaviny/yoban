@@ -2,23 +2,14 @@
 
 namespace yoban.Mqtt.ControlPacket
 {
-    public sealed class ConnectOptions
+    public sealed class Connect
     {
-        public ConnectOptions()
-        {
-            ClientId = Guid.NewGuid().ToString();
-        }
+        public Protocol Protocol { get; set; }
         public string ClientId { get; set; }
         public string Username { get; set; }
         public string Password { get; set; }
-    }
-    public sealed class Connect : ControlPacketBase
-    {
-        private readonly ConnectOptions _options;
-        public Connect(ConnectOptions options) => _options = options;
-        public override byte[] ToBytes()
-        {
-            throw new System.NotImplementedException();
-        }
+        public Will Will { get; set; }
+        public bool CleanSession { get; set; }
+        public TimeSpan KeepAliveInterval { get; set; }
     }
 }

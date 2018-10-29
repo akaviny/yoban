@@ -6,13 +6,8 @@ using yoban.Mqtt.ControlPacket;
 
 namespace yoban.Mqtt
 {
-    public static class Extensions
+    public static class SocketExtensions
     {
-        public static Task WriteControlPacket(this INetworkConnection networkConnection, ControlPacketBase controlPacket)
-        {
-            var buffer = controlPacket.ToBytes();
-            return networkConnection.WriteAsync(buffer, 0, buffer.Length);
-        }
         public static Task ConnectAsync(this Socket socket, IPAddress ipAddress, int port)
         {
             var tcs = new TaskCompletionSource<bool>(socket);
