@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -9,7 +10,7 @@ namespace yoban.Mqtt.ControlPacket
     {
 
         // Connect => ConnectAck
-        internal static Task WriteConnectAsync(this Stream stream, Connect connect)
+        internal static async Task WriteConnectAsync(this Stream stream, Connect connect)
         {            
             // Determine packet size
             var variableHeaderSize = connect.Protocol.Size + LengthPrefixSize + ConnectFlagsSize + KeepAliveSize;
@@ -29,11 +30,7 @@ namespace yoban.Mqtt.ControlPacket
 
             // Variable header
             // - Protocol name
-            var protocolNameBuffer = Encoding.UTF8.GetBytes(connect.Protocol.Name);
-            Buffer.BlockCopy(protocolNameBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-            index += LengthPrefixSize;            
-            Buffer.BlockCopy(protocolNameBuffer, 0, buffer, index, protocolNameBuffer.Length);
-            index += protocolNameBuffer.Length;
+            index = EncodeString(connect.Protocol.Name, buffer, index);
             // - Protocol level
             buffer[index++] = connect.Protocol.Level;
             // - Connect flags
@@ -44,51 +41,18 @@ namespace yoban.Mqtt.ControlPacket
 
             // Payload
             // - Client Identifier            
-            var clientIdBuffer = Encoding.UTF8.GetBytes(connect.ClientId);
-            Buffer.BlockCopy(clientIdBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-            index += LengthPrefixSize;
-            Buffer.BlockCopy(clientIdBuffer, 0, buffer, index, clientIdBuffer.Length);
-            index += clientIdBuffer.Length;
+            index = EncodeString(connect.ClientId, buffer, index);
             // - Will Topic
-            if (connect.Will != null)
-            {
-                if (!string.IsNullOrWhiteSpace(connect.Will.Topic))
-                {
-                    var topicBuffer = Encoding.UTF8.GetBytes(connect.Will.Topic);
-                    Buffer.BlockCopy(topicBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-                    index += LengthPrefixSize;
-                    Buffer.BlockCopy(topicBuffer, 0, buffer, index, topicBuffer.Length);
-                    index += topicBuffer.Length;
-                }
-                if (!string.IsNullOrWhiteSpace(connect.Will.Message))
-                {
-                    var messageBuffer = Encoding.UTF8.GetBytes(connect.Will.Message);
-                    Buffer.BlockCopy(messageBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-                    index += LengthPrefixSize;
-                    Buffer.BlockCopy(messageBuffer, 0, buffer, index, messageBuffer.Length);
-                    index += messageBuffer.Length;
-                }
-            }
+            index = EncodeString(connect.Will?.Topic, buffer, index);
+            // - Will Message
+            index = EncodeString(connect.Will?.Message, buffer, index);
             // - User Name
-            if (!string.IsNullOrWhiteSpace(connect.Username))
-            {
-                var usernameBuffer = Encoding.UTF8.GetBytes(connect.Username);
-                Buffer.BlockCopy(usernameBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-                index += LengthPrefixSize;
-                Buffer.BlockCopy(usernameBuffer, 0, buffer, index, usernameBuffer.Length);
-                index += usernameBuffer.Length;
-            }
+            index = EncodeString(connect.Username, buffer, index);
             // - Password
-            if (!string.IsNullOrWhiteSpace(connect.Password))
-            {
-                var passwordBuffer = Encoding.UTF8.GetBytes(connect.Password);
-                Buffer.BlockCopy(passwordBuffer.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
-                index += LengthPrefixSize;
-                Buffer.BlockCopy(passwordBuffer, 0, buffer, index, passwordBuffer.Length);
-                index += passwordBuffer.Length;
-            }
-            Console.WriteLine($"Connect packet size => {index}");
-            return stream.WriteAsync(buffer, 0, index);
+            index = EncodeString(connect.Password, buffer, index);
+            
+            await stream.WriteAsync(buffer, 0, index).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
         }
         internal static Task<ConnectAck> ReadConnectAckAsync(this Stream stream)
         {
@@ -143,7 +107,16 @@ namespace yoban.Mqtt.ControlPacket
                 return bytes;
             }
             return BitConverter.GetBytes(value);
-        }       
+        }  
+        private static int EncodeString(string value, byte[] buffer, int index)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return index;
+            var bytes = Encoding.UTF8.GetBytes(value);
+            Buffer.BlockCopy(bytes.Length.GetBigEndianBytes(), 0, buffer, index, LengthPrefixSize);
+            index += LengthPrefixSize;
+            Buffer.BlockCopy(bytes, 0, buffer, index, bytes.Length);
+            return index + bytes.Length;
+        }
         private static byte CombineNibbles(byte high, byte low) => (byte)((high << 4) | low);
         private static bool IsLittleEndian => BitConverter.IsLittleEndian;
         private static int TryGetUTF8ByteCount(this string value, int lengthPrefix = LengthPrefixSize) => value == null ? 0 : Encoding.UTF8.GetByteCount(value) + lengthPrefix;        

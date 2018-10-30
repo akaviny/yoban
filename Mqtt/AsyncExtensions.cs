@@ -52,6 +52,5 @@ namespace yoban.Mqtt
             }, tcs);
             return tcs.Task;
         }
-
     }
 }

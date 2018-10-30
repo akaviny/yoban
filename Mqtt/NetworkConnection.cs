@@ -22,15 +22,15 @@ namespace yoban.Mqtt
         public int Port { get; private set; }
         public async Task<Stream> ConnectAsync()
         {
-            var hostEntry = await AsyncExtensions.GetHostEntryAsync(HostName);
+            var hostEntry = await AsyncExtensions.GetHostEntryAsync(HostName).ConfigureAwait(false);
             var ipAddress = hostEntry?.AddressList?.First(ip => ip != null);
             if (ipAddress == null)
             {
                 throw new InvalidOperationException("Invalid hostname");
             }
             _socket = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            await _socket.ConnectAsync(ipAddress, Port);
-            _stream = new NetworkStream(_socket);
+            await _socket.ConnectAsync(ipAddress, Port).ConfigureAwait(false);
+            _stream = new NetworkStream(_socket, true);
             return _stream;
         }
     }

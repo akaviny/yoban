@@ -10,14 +10,15 @@ namespace Mqtt.Console
     {
         public static async Task Main(string[] args)
         {
-            var networkConnection = new NetworkConnection("adb7aem1d5wr-ats.iot.eu-west-1.amazonaws.com", 443);
+            var networkConnection = new NetworkConnection("adb7aem1d5wr-ats.iot.eu-west-1.amazonaws.com", 8883);
             var clientCertificate = new X509Certificate2(@"C:\certs\icap\123456789\7d54cd11a2-certificate.pfx", "123456789");
             var mqttClient = new MqttSecureClient(networkConnection, clientCertificate);
             var connectPacket = new Connect
             {
-                ClientId = Guid.NewGuid().ToString()
+                ClientId = "ClientId"
             };
             await mqttClient.ConnectAsync(connectPacket);
+            System.Console.ReadKey();
         }
     }
 }
