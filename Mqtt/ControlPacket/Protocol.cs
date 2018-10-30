@@ -5,9 +5,10 @@
         public static Protocol V3_1_1 = new Protocol
         {
             Name = "MQTT",
-            Level = 0x04
+            Level = 0x04,            
         };
         public string Name { get; set; }
         public byte Level { get; set; }
+        public int Size => Name.Length + 1;
     }
 }

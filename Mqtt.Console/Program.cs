@@ -18,7 +18,6 @@ namespace Mqtt.Console
                 ClientId = Guid.NewGuid().ToString()
             };
             await mqttClient.ConnectAsync(connectPacket);
-            System.Console.ReadKey();
         }
     }
 }
