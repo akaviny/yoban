@@ -54,9 +54,20 @@ namespace yoban.Mqtt.ControlPacket
             await stream.WriteAsync(buffer, 0, index).ConfigureAwait(false);
             await stream.FlushAsync().ConfigureAwait(false);
         }
-        internal static Task<ConnectAck> ReadConnectAckAsync(this Stream stream)
+        internal static async Task<ConnectAck> ReadConnectAckAsync(this Stream stream)
         {
-            return Task.FromResult(new ConnectAck());
+            var remainingLengthDecoding = await DecodeVariableLengthAsync(stream);
+            if (remainingLengthDecoding.remainingLength != 2) throw new InvalidOperationException("Invalid number of remaining bytes");
+            return new ConnectAck
+            {
+                SessionPresent = Convert.ToBoolean(remainingLengthDecoding.buffer[0] & 0x01),
+                ReturnCode = remainingLengthDecoding.buffer[1]
+            };
+        }
+        internal static async Task WriteDisconnectAsync(this Stream stream)
+        {
+            await stream.WriteAsync(new byte[] { CombineNibbles(Disconnect.PacketType, Reserved) }, 0, 1).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
         }
         private static int GetLength(this Will will)
         {
@@ -70,7 +81,7 @@ namespace yoban.Mqtt.ControlPacket
         private static (int length, byte[] buffer) EncodeVariableLength(int length)
         {
             // Taken directly from mqtt v3.1.1 section 2.2.3
-            byte[] buffer = new byte[4];
+            var buffer = new byte[4];
             var value = 0;
             var index = 0;
             do
@@ -82,7 +93,28 @@ namespace yoban.Mqtt.ControlPacket
             }
             while (length > 0);
             return (index, buffer);
-        }        
+        }  
+        private static async Task<(int remainingLength, byte[] buffer)> DecodeVariableLengthAsync(Stream stream)
+        {
+            // Taken directly from mqtt v3.1.1 section 2.2.3
+            const int termination = 128 * 128 * 128;
+            var multiplier = 1;
+            var remainingLength = 0;
+            var next = new byte[1];
+            int numRead = 0;
+            do
+            {
+                numRead = await stream.ReadAsync(next, 0, 1).ConfigureAwait(false);
+                if (numRead == 0) throw new InvalidOperationException("Stream read is empty");
+                remainingLength += (next[0] & 127) * multiplier;
+                multiplier *= 128;
+                if (multiplier == termination) throw new InvalidOperationException("Malformed remaining length");
+            } while ((next[0] & 128) != 0);
+            var buffer = new byte[remainingLength];
+            numRead = await stream.ReadAsync(buffer, 0, remainingLength);
+            if (numRead == 0 || numRead != remainingLength) throw new InvalidOperationException("Stream read error");
+            return (remainingLength, buffer);
+        }
         private static byte GetConnectFlags(this Connect connect)
         {
             byte flags = 0b0000_0000;
