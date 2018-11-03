@@ -1,8 +1,10 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using yoban.Mqtt.ControlPacket;
@@ -26,6 +28,7 @@ namespace yoban.Mqtt
             await sslStream.AuthenticateAsClientAsync(_mqtt.NetworkConnection.HostName, clientCertificates, SslProtocols.Tls12, true).ConfigureAwait(false);
             await _mqtt.ConnectAsync(connect, sslStream).ConfigureAwait(false);            
         }
+        public Task SubscribeAsync(Subscribe subscribe) => _mqtt.SubscribeAsync(subscribe);
     }
     public sealed class MqttClient
     {
@@ -52,6 +55,7 @@ namespace yoban.Mqtt
             _listener = StartListeningAsync();
             return _stream.WriteConnectAsync(connect);
         }
+        internal Task SubscribeAsync(Subscribe subscribe) => _stream.WriteSubscribeAsync(subscribe);
         internal Task DisconnectAsync()
         {
             // Ignore any messages during disconnect
@@ -60,23 +64,34 @@ namespace yoban.Mqtt
         }
         private async Task StartListeningAsync()
         {
-            var fixedHeader = new byte[1];
+            var nextByte = new byte[1];
             var readCount = 0;
             
             while (!_cts.IsCancellationRequested)
             {
                 try
                 {
-                    readCount = await _stream.ReadAsync(fixedHeader, 0, 1).ConfigureAwait(false);
+                    readCount = await _stream.ReadAsync(nextByte, 0, 1).ConfigureAwait(false);
                     if (readCount == 1)
                     {
-                        switch (fixedHeader[0] >> 4)
+                        var highNibble = (byte)((nextByte[0] & 0xF0) >> 4);
+                        switch (highNibble)
                         {
                             case ConnectAck.PacketType:
                                 var connectAck = await _stream.ReadConnectAckAsync().ConfigureAwait(false);
                                 Console.WriteLine("Connected");
                                 break;
+                            case SubscribeAck.PacketType:
+                                var subscribeAck = await _stream.ReadSubscribeAckAsync().ConfigureAwait(false);
+                                Console.WriteLine($"ClientId: {subscribeAck.PacketId} => {subscribeAck.ReturnCodes.Aggregate("", (value, code) => value + $" {code}")}");
+                                break;
+                            case Publish.PacketType:
+                                var lowNibble = (byte)(nextByte[0] & 0x0F);
+                                var publish = await _stream.ReadPublishAsync(lowNibble).ConfigureAwait(false);
+                                Console.WriteLine($"Received message: {Encoding.UTF8.GetString(publish.Message)}");
+                                break;
                             default:
+                                Console.WriteLine(nextByte[0]);
                                 break;
                         }
                     }

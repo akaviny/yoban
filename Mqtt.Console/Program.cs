@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using yoban.Mqtt;
@@ -15,9 +16,27 @@ namespace Mqtt.Console
             var mqttClient = new MqttSecureClient(networkConnection, clientCertificate);
             var connectPacket = new Connect
             {
-                ClientId = "ClientId"
+                ClientId = Guid.NewGuid().ToString()
             };
             await mqttClient.ConnectAsync(connectPacket);
+            var subscribePacket = new Subscribe
+            {
+                PacketId = 0x01,
+                Subscriptions = new List<Subscription>
+                {
+                    new Subscription
+                    {
+                        TopicFilter = "test/first",
+                        RequestedQoS = QoS.AtLeastOnce
+                    },
+                    new Subscription
+                    {
+                        TopicFilter = "test/second",
+                        RequestedQoS = QoS.AtLeastOnce
+                    }
+                }
+            };
+            await mqttClient.SubscribeAsync(subscribePacket);
             System.Console.ReadKey();
         }
     }
