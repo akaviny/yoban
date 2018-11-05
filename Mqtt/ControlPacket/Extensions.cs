@@ -9,7 +9,6 @@ namespace yoban.Mqtt.ControlPacket
 {
     internal static class Extensions
     {
-
         // Connect => ConnectAck
         internal static async Task WriteConnectAsync(this Stream stream, Connect connect)
         {            
@@ -57,10 +56,10 @@ namespace yoban.Mqtt.ControlPacket
         }
         internal static async Task<ConnectAck> ReadConnectAckAsync(this Stream stream)
         {
-            var remainingLength = await DecodeRemainingLengthAsync(stream);
+            var remainingLength = await DecodeRemainingLengthAsync(stream).ConfigureAwait(false);
             if (remainingLength != 2) throw new InvalidOperationException("Invalid number of remaining bytes");
             var buffer = new byte[remainingLength];
-            var numRead = await stream.ReadAsync(buffer, 0, remainingLength);
+            await stream.ReadBytesAsync(buffer, 0, remainingLength).ConfigureAwait(false);
             return new ConnectAck
             {
                 SessionPresent = Convert.ToBoolean(buffer[0] & 0x01),
@@ -103,18 +102,60 @@ namespace yoban.Mqtt.ControlPacket
         }
         internal static async Task<SubscribeAck> ReadSubscribeAckAsync(this Stream stream)
         {
-            var remainingLength = await DecodeRemainingLengthAsync(stream);
+            var remainingLength = await DecodeRemainingLengthAsync(stream).ConfigureAwait(false);
             var buffer = new byte[remainingLength];
-            var numRead = await stream.ReadAsync(buffer, 0, remainingLength);
+            await stream.ReadBytesAsync(buffer, 0, remainingLength).ConfigureAwait(false);
             return new SubscribeAck
             {
                 PacketId = buffer.FromBigEndianBytes(),
                 ReturnCodes = new ArraySegment<byte>(buffer, WordSize, remainingLength - WordSize).ToArray()
             };
         }
+        internal static async Task WritePublishAsync(this Stream stream, Publish publish)
+        {
+            // Determine packet size
+            var variableHeaderSize = publish.TopicName.TryGetUTF8ByteCount();
+            if (publish.QoS > QoS.AtMostOnce) variableHeaderSize += WordSize;
+            var payloadSize = publish.GetPayloadSize();
+            var (remainingLength, remainingLengthBuffer) = EncodeRemainingLength(variableHeaderSize + payloadSize);
+            var fixedHeaderSize = 1 + remainingLength; // 1 => holds packet type in high nibble, flags in low
+            var bufferSize = fixedHeaderSize + variableHeaderSize + payloadSize;
+            var buffer = new byte[bufferSize];
+            var index = 0;
+
+            // Fixed header
+            // - Packet type        
+            byte lowNibble = Empty;
+            lowNibble
+                .SetFlag(publish.Retain, Bit0)
+                .SetQoS(publish.QoS, Bit1)
+                .SetFlag(publish.Dup, Bit3);
+            buffer[index++] = CombineNibbles(Publish.PacketType, lowNibble);
+            // - Remaining length
+            Buffer.BlockCopy(remainingLengthBuffer, 0, buffer, index, remainingLength);
+            index += remainingLength;
+
+            // Variable header
+            // - Topic Name
+            index = EncodeString(publish.TopicName, buffer, index);
+            // - Packet Id
+            if (publish.QoS > 0)
+            {
+                Buffer.BlockCopy(publish.PacketId.GetBigEndianBytes(), 0, buffer, index, WordSize);
+                index += WordSize;
+            }
+
+            // Payload
+            // - Message
+            Buffer.BlockCopy(publish.Message, 0, buffer, index, publish.Message.Length);
+            index += publish.Message.Length;
+
+            await stream.WriteAsync(buffer, 0, index).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
+        }
         internal static async Task<Publish> ReadPublishAsync(this Stream stream, byte lowNibble)
         {
-            var remainingLength = await DecodeRemainingLengthAsync(stream);
+            var remainingLength = await DecodeRemainingLengthAsync(stream).ConfigureAwait(false);
             var publish = new Publish
             {
                 Dup = (lowNibble & Bit3) == Bit3,
@@ -129,7 +170,7 @@ namespace yoban.Mqtt.ControlPacket
                 payloadLength -= WordSize;
             }
             var buffer = new byte[payloadLength];
-            var numRead = await stream.ReadAsync(buffer, 0, payloadLength).ConfigureAwait(false);
+            await stream.ReadBytesAsync(buffer, 0, payloadLength).ConfigureAwait(false);
             publish.Message = buffer;
             return publish;
         }
@@ -149,6 +190,7 @@ namespace yoban.Mqtt.ControlPacket
             => connect.ClientId.TryGetUTF8ByteCount() + connect.Will.GetLength() + connect.Username.TryGetUTF8ByteCount() + connect.Password.TryGetUTF8ByteCount();
         private static int GetPayloadSize(this Subscribe subscribe)
             => subscribe.Subscriptions.Select(subscription => subscription.TopicFilter).Aggregate(0, (count, topicFilter) => count + topicFilter.TryGetUTF8ByteCount()) + subscribe.Subscriptions.Count;
+        private static int GetPayloadSize(this Publish publish) => publish.Message.Length;
         private static (int length, byte[] buffer) EncodeRemainingLength(int length)
         {
             // Taken directly from mqtt v3.1.1 section 2.2.3
@@ -172,11 +214,9 @@ namespace yoban.Mqtt.ControlPacket
             var multiplier = 1;
             var remainingLength = 0;
             var next = new byte[1];
-            int numRead = 0;
             do
             {
-                numRead = await stream.ReadAsync(next, 0, 1).ConfigureAwait(false);
-                if (numRead == 0) throw new InvalidOperationException("Stream read is empty");
+                await stream.ReadBytesAsync(next, 0, 1).ConfigureAwait(false);
                 remainingLength += (next[0] & 127) * multiplier;
                 multiplier *= 128;
                 if (multiplier == termination) throw new InvalidOperationException("Malformed remaining length");
@@ -198,7 +238,8 @@ namespace yoban.Mqtt.ControlPacket
             return flags;
         }
         // BitConverter.GetBytes uses the host for endianness; typically, this is little endian, so create a specific endian converter
-        private static byte[] GetBigEndianBytes(this int value) => GetBigEndianBytes((short)value);
+        private static byte[] GetBigEndianBytes(this int value) 
+            => GetBigEndianBytes((short)value);
         private static byte[] GetBigEndianBytes(this short value)
         {
             if (IsLittleEndian)
@@ -231,15 +272,15 @@ namespace yoban.Mqtt.ControlPacket
         }
         private static async Task<(int count, string value)> DecodeStringAsync(this Stream stream)
         {
-            var length = await stream.DecodeShortAsync();
+            var length = await stream.DecodeShortAsync().ConfigureAwait(false);
             var buffer = new byte[length];
-            await stream.ReadAsync(buffer, 0, length);
+            await stream.ReadBytesAsync(buffer, 0, length).ConfigureAwait(false);
             return (length + LengthPrefixSize, Encoding.UTF8.GetString(buffer));
         }
         private static async Task<short> DecodeShortAsync(this Stream stream)
         {
             var buffer = new byte[LengthPrefixSize];
-            var numRead = await stream.ReadAsync(buffer, 0, LengthPrefixSize).ConfigureAwait(false);
+            await stream.ReadBytesAsync(buffer, 0, LengthPrefixSize).ConfigureAwait(false);
             return FromBigEndianBytes(buffer);
         }
         private static void ForEach<T>(this IEnumerable<T> sequence, Action<T> action)
@@ -247,7 +288,24 @@ namespace yoban.Mqtt.ControlPacket
             foreach (var item in sequence)
                 action(item);
         }
-        private static byte CombineNibbles(byte high, byte low) => (byte)((high << 4) | low);
+        private static byte ToByte(this bool value, byte bitPosition = 0)
+        {
+            return (byte)(value ? 1 : 0 << bitPosition);
+        }
+        private static byte SetFlag(this byte flags, bool flag, byte bitPosition)
+        {
+            byte mask = (byte)(1 << bitPosition);
+            if (flag) return flags |= mask;
+            return flags &= mask;
+        }
+        private static byte SetQoS(this byte flags, QoS qos, byte bitPosition)
+        {
+            byte mask = (byte)((byte)qos << bitPosition);
+            return flags &= mask;
+        }
+        
+        private static byte CombineNibbles(byte high, byte low) 
+            => (byte)(((high & 0x0F) << 4) | low & 0x0F);
         private static bool IsLittleEndian => BitConverter.IsLittleEndian;
         private static int TryGetUTF8ByteCount(this string value, int lengthPrefix = LengthPrefixSize) => value == null ? 0 : Encoding.UTF8.GetByteCount(value) + lengthPrefix;        
         private const int WordSize = 2;

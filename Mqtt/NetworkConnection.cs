@@ -22,7 +22,7 @@ namespace yoban.Mqtt
         public int Port { get; private set; }
         public async Task<Stream> ConnectAsync()
         {
-            var hostEntry = await AsyncExtensions.GetHostEntryAsync(HostName).ConfigureAwait(false);
+            var hostEntry = await Helpers.GetHostEntryAsync(HostName).ConfigureAwait(false);
             var ipAddress = hostEntry?.AddressList?.First(ip => ip != null);
             if (ipAddress == null)
             {
